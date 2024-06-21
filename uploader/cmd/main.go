@@ -19,7 +19,6 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/nats-io/nats.go"
-	// "github.com/open-policy-agent/opa/rego"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/viper"
@@ -392,6 +391,53 @@ func getUserFiles(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+func downloadFile(db *sql.DB, minioClient *minio.Client, bucketName string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := r.Context().Value("id").(int)
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		etag := r.URL.Query().Get("etag")
+		if etag == "" {
+			http.Error(w, "Missing etag", http.StatusBadRequest)
+			return
+		}
+
+		// Verify that the file belongs to the user
+		var filename, contentType string
+		err := db.QueryRow("SELECT filename, content_type FROM files WHERE etag=$1 AND user_id=$2", etag, userID).Scan(&filename, &contentType)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				http.Error(w, "File not found", http.StatusNotFound)
+			} else {
+				l.Error(err)
+				http.Error(w, "Server error", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		// Get the file from MinIO
+		object, err := minioClient.GetObject(context.Background(), bucketName, filename, minio.GetObjectOptions{})
+		if err != nil {
+			l.Error(err)
+			http.Error(w, "Error retrieving file", http.StatusInternalServerError)
+			return
+		}
+		defer object.Close()
+
+		// Set the content type and other headers, then write the file to the response
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+		if _, err := io.Copy(w, object); err != nil {
+			l.Error(err)
+			http.Error(w, "Error writing file to response", http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
 func main() {
 	l.Debug("Reading configuration")
 	config := buildConfig()
@@ -480,13 +526,8 @@ func main() {
 		fileURL := fmt.Sprintf("http://%s/%s/%s", config.MinioHost, config.MinioBucket, handler.Filename)
 		etag := info.ETag
 
-		userID, ok := r.Context().Value("id").(int)
-		if !ok {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
 		// Store metadata in PostgreSQL
-		err = storeFileMetadata(ctx, db, handler.Filename, fileSize, contentType, etag, fileURL, sha256Checksum, userID) // Assuming userID is 1 for this example
+		err = storeFileMetadata(ctx, db, handler.Filename, fileSize, contentType, etag, fileURL, sha256Checksum, 1) // Assuming userID is 1 for this example
 		if err != nil {
 			l.Errorw("Could not store file metadata", zap.String("filename", handler.Filename), zap.Error(err))
 			http.Error(w, "Error storing file metadata", http.StatusInternalServerError)
@@ -500,6 +541,7 @@ func main() {
 	})))
 
 	http.Handle("/files", authenticate(getUserFiles(db)))
+	http.Handle("/download", authenticate(downloadFile(db, minioClient, config.MinioBucket)))
 
 	// Expose the /metrics endpoint
 	http.Handle("/metrics", promhttp.Handler())
