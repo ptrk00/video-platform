@@ -5,7 +5,7 @@ services:
     image: elearning-uploader
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: uploader/Dockerfile
     expose:
       - '8080'
     ports:
@@ -89,17 +89,18 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_DB=videos
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready", "-d", "db_prod"]
+      test: ["CMD-SHELL", "pg_isready -d videos -U postgres"]
       interval: 10s
       timeout: 60s
       retries: 10
-      start_period: 10s  
+      start_period: 3s  
 
   postgresssetup:
     image: gomicro/goose:3.7.0
     volumes:
       - ./db/migrations:/migrations
     environment:
+      PGUSER: postgres
       GOOSE_DRIVER: postgres 
       GOOSE_DBSTRING: postgresql://postgres:5432/videos?user=postgres&password=postgres
       GOOSE_MIGRATION_DIR: /migrations
