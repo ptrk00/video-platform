@@ -1,0 +1,107 @@
+services:
+  uploader:
+    container_name: uploader
+    hostname: uploader
+    image: elearning-uploader
+    build:
+      context: .
+      dockerfile: Dockerfile
+    expose:
+      - '8080'
+    ports:
+      - '8080:8080'
+    environment:
+      PORT: 8080
+      MINIO_HOST: minio
+      MINIO_PORT: 9000
+      MINIO_USER: minioadmin
+      MINIO_PASSWORD: minioadmin
+      MINIO_BUCKET: videos
+      VIDEO_FORM_FILENAME: myfile
+    depends_on:
+      - minio
+      - nats
+      - postgres
+  
+  minio:
+    container_name: minio
+    hostname: minio
+    image: minio/minio
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    expose:
+      - 9000
+      - 9001
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - 'minio_data:/data'
+    command: [ "minio", "server", "/data"]
+
+  miniosetup:
+    container_name: miniosetup
+    hostname: miniosetup
+    image: minio/minio
+    entrypoint: [ "sh", "-c", "mc alias set minio http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing minio/videos"]
+    depends_on:
+      - minio
+
+  nats:
+    container_name: nats
+    hostname: nats
+    image: nats:2-alpine
+    ports:
+      - '4222:4222'
+    command:
+      - -js
+      - -sd
+      - /var/lib/nats/data
+      - --user
+      - admin
+      - --pass
+      - admin
+    volumes:
+      - 'jsdata:/var/lib/nats/data'
+
+  natssetup:
+    container_name: natssetup
+    hostname: natssetup
+    image: bitnami/natscli
+    entrypoint: [ "sh", "-c", "nats stream add events --server nats://admin:admin@nats:4222 --subjects \"videos.*\" 
+    --storage file --retention limits --max-msgs=-1 --max-bytes=-1 --max-age=0 --max-msg-size=-1 --discard old --defaults"]
+    depends_on:
+      - nats
+  
+  postgres:
+    image: postgres:14-alpine
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=videos
+  
+  postgresssetup:
+    image: gomicro/goose:3.7.0
+    volumes:
+      - ./db/migrations:/migrations
+    environment:
+      GOOSE_DRIVER: postgres 
+      GOOSE_DBSTRING: postgresql://postgres:5432/videos?user=postgres&password=postgres
+      GOOSE_MIGRATION_DIR: /migrations
+    entrypoint: ["sh", "-c", "goose up"]
+    depends_on:
+      - postgres
+
+volumes:
+  minio_data:
+    driver: local
+  jsdata:
+    driver: local
+  postgres_data:
+    driver: local
