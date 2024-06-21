@@ -16,8 +16,6 @@ services:
       PORT: 8080
       MINIO_HOST: minio
       MINIO_PORT: 9000
-      MINIO_USER: minioadmin
-      MINIO_PASSWORD: minioadmin
       MINIO_BUCKET: videos
       VIDEO_FORM_FILENAME: myfile
       JAEGER_ENDPOINT: http://jaeger:14268/api/traces
@@ -27,6 +25,53 @@ services:
       natssetup:
         condition: service_completed_successfully
       miniosetup:
+        condition: service_completed_successfully
+      vault-agent:
+        condition: service_started
+
+    volumes:
+      - ./volumes/vault/agent:/etc/vault
+      - secrets:/vault/secrets
+    entrypoint: ["sh", "-c", ". /vault/secrets/minio_credentials && ./uploader"]
+
+  vault:
+    image: vault:1.13.3
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_ADDR: http://vault:8200
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: [ "CMD", "vault", "status" ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  vaultsetup:
+    image: vault:1.13.3
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_ADDR: http://vault:8200
+    cap_add:
+      - IPC_LOCK
+    command: sh -c "vault login root && vault kv put secret/minio user=minioadmin password=minioadmin"
+    depends_on:
+      vault:
+        condition: service_healthy
+
+  vault-agent:
+    image: vault:1.13.3
+    command: agent -config=/etc/vault/config.hcl
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - ./volumes/vault/agent:/etc/vault
+      - secrets:/vault/secrets
+    depends_on:
+      vaultsetup:
         condition: service_completed_successfully
 
   minio:
@@ -39,11 +84,13 @@ services:
     expose:
       - 9000
       - 9001
+    volumes:
+      - 'minio_data:/data'
+      - ./volumes/vault/agent:/etc/vault
+      - secrets:/vault/secrets
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
-    volumes:
-      - 'minio_data:/data'
     command: [ "minio", "server", "/data"]
 
   miniosetup:
@@ -54,6 +101,8 @@ services:
       mc mb --ignore-existing minio/videos"]
     depends_on:
       - minio
+    volumes:
+      - secrets:/vault/secrets
 
   nats:
     container_name: nats
@@ -138,10 +187,18 @@ services:
       - prometheus
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_LOG_LEVEL=error
     volumes:
       - ./volumes/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
       - ./volumes/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
       - ./volumes/grafana/dashboards:/var/lib/grafana/dashboards
+
+  change-vol-permissions:
+    image: ubuntu:22.04
+    user: "root"
+    volumes:
+      - secrets:/tmp/vol
+    command: chmod 777 /tmp/vol
 
 volumes:
   minio_data:
@@ -149,4 +206,6 @@ volumes:
   jsdata:
     driver: local
   postgres_data:
+    driver: local
+  secrets:
     driver: local
