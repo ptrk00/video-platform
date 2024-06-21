@@ -2,11 +2,29 @@ services:
   - name: "example"
     url: "http://opa:8181"
 
-bundles:
-  example:
-    service: "example"
-    resource: "policy.rego"
-
 labels:
   version: "0.1.0"
   author: "author"
+
+distributed_tracing:
+  type: "grpc"
+  address: "jaeger:4317"
+  serive_name: opa
+
+metrics:
+  prometheus: true
+
+# status:
+#   service: "example"
+#   bundle:
+#     name: "example"
+#     reporting:
+#       min_delay_seconds: 10
+#       max_delay_seconds: 20
+
+# decision_logs:
+#   console: true
+#   service: "example"
+#   reporting:
+#     min_delay_seconds: 10
+#     max_delay_seconds: 20

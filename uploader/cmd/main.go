@@ -68,6 +68,7 @@ type Credentials struct {
 
 type Claims struct {
 	Username string `json:"username"`
+	ID       int    `json:"id"`
 	jwt.StandardClaims
 }
 
@@ -208,10 +209,11 @@ func storeFileMetadata(ctx context.Context, db *sql.DB, filename string, filesiz
 	return err
 }
 
-func generateJWT(username string) (string, error) {
+func generateJWT(username string, id int) (string, error) {
 	expirationTime := time.Now().Add(1 * time.Hour)
 	claims := &Claims{
 		Username: username,
+		ID:       id,
 		StandardClaims: jwt.StandardClaims{
 			ExpiresAt: expirationTime.Unix(),
 		},
@@ -235,7 +237,8 @@ func login(db *sql.DB) http.HandlerFunc {
 
 		// Query the user from the database
 		var storedPassword string
-		err = db.QueryRow("SELECT password FROM app_users WHERE username=$1", creds.Username).Scan(&storedPassword)
+		var userID int
+		err = db.QueryRow("SELECT id, password FROM app_users WHERE username=$1", creds.Username).Scan(&userID, &storedPassword)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				l.Error(err)
@@ -254,7 +257,7 @@ func login(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		token, err := generateJWT(creds.Username)
+		token, err := generateJWT(creds.Username, userID)
 		if err != nil {
 			http.Error(w, "Error generating token", http.StatusInternalServerError)
 			return
@@ -263,20 +266,6 @@ func login(db *sql.DB) http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]string{"token": token})
 	}
 }
-
-// func validateToken(tokenStr string) (*Claims, error) {
-// 	claims := &Claims{}
-// 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
-// 		return []byte(jwtSecret), nil
-// 	})
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	if !token.Valid {
-// 		return nil, fmt.Errorf("invalid token")
-// 	}
-// 	return claims, nil
-// }
 
 func authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -288,12 +277,16 @@ func authenticate(next http.Handler) http.Handler {
 		}
 
 		tokenStr := authHeader[len("Bearer "):]
-		// claims, err := validateToken(tokenStr)
-		// if err != nil {
-		// 	l.Errorf("error validating token %v", err)
-		// 	http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		// 	return
-		// }
+
+		// Parse and validate the token
+		claims := &Claims{}
+		token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
+			return []byte(jwtSecret), nil
+		})
+		if err != nil || !token.Valid {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 
 		// Check the token against the OPA policy
 		result, err := checkOPAPolicy(tokenStr)
@@ -304,6 +297,7 @@ func authenticate(next http.Handler) http.Handler {
 		}
 
 		ctx := context.WithValue(r.Context(), "username", result["username"])
+		ctx = context.WithValue(ctx, "id", claims.ID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -312,7 +306,7 @@ func checkOPAPolicy(tokenStr string) (map[string]interface{}, error) {
 	ctx := context.Background()
 	input := map[string]interface{}{
 		"input": map[string]interface{}{
-			"token":    tokenStr,
+			"token": tokenStr,
 		},
 	}
 
@@ -352,6 +346,51 @@ func checkOPAPolicy(tokenStr string) (map[string]interface{}, error) {
 	return result, nil
 }
 
+func getUserFiles(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := r.Context().Value("id").(int)
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		rows, err := db.Query("SELECT filename, filesize, content_type, etag, file_url, checksum FROM files WHERE user_id=$1", userID)
+		if err != nil {
+			l.Error(err)
+			http.Error(w, "Server error", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		var files []map[string]interface{}
+		for rows.Next() {
+			var file map[string]interface{}
+			var filename, contentType, etag, fileURL, checksum string
+			var filesize int64
+			if err := rows.Scan(&filename, &filesize, &contentType, &etag, &fileURL, &checksum); err != nil {
+				l.Error(err)
+				http.Error(w, "Server error", http.StatusInternalServerError)
+				return
+			}
+			file = map[string]interface{}{
+				"filename":    filename,
+				"filesize":    filesize,
+				"content_type": contentType,
+				"etag":        etag,
+				"file_url":    fileURL,
+				"checksum":    checksum,
+			}
+			files = append(files, file)
+		}
+		if err := rows.Err(); err != nil {
+			l.Error(err)
+			http.Error(w, "Server error", http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(files)
+	}
+}
 
 func main() {
 	l.Debug("Reading configuration")
@@ -441,8 +480,13 @@ func main() {
 		fileURL := fmt.Sprintf("http://%s/%s/%s", config.MinioHost, config.MinioBucket, handler.Filename)
 		etag := info.ETag
 
+		userID, ok := r.Context().Value("id").(int)
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 		// Store metadata in PostgreSQL
-		err = storeFileMetadata(ctx, db, handler.Filename, fileSize, contentType, etag, fileURL, sha256Checksum, 1) // Assuming userID is 1 for this example
+		err = storeFileMetadata(ctx, db, handler.Filename, fileSize, contentType, etag, fileURL, sha256Checksum, userID) // Assuming userID is 1 for this example
 		if err != nil {
 			l.Errorw("Could not store file metadata", zap.String("filename", handler.Filename), zap.Error(err))
 			http.Error(w, "Error storing file metadata", http.StatusInternalServerError)
@@ -454,6 +498,8 @@ func main() {
 		fmt.Fprintf(w, "Successfully uploaded %s\n", handler.Filename)
 		publishMessage(ctx, config.MinioBucket, handler.Filename)
 	})))
+
+	http.Handle("/files", authenticate(getUserFiles(db)))
 
 	// Expose the /metrics endpoint
 	http.Handle("/metrics", promhttp.Handler())

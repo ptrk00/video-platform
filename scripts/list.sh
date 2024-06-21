@@ -1,0 +1,1 @@
+curl -vvv -X POST http://localhost:8080/files -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InVzZXIxIiwiaWQiOjEsImV4cCI6MTcxODk5NzQ1OX0.cFgyIYQc6embaMyyV6o5BY5LuDjX2r79gpO3l8TqxV4'
