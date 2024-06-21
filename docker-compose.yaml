@@ -27,7 +27,7 @@ services:
       miniosetup:
         condition: service_completed_successfully
       vault-agent:
-        condition: service_started
+        condition: service_healthy
 
     volumes:
       - ./volumes/vault/agent:/etc/vault
@@ -70,6 +70,12 @@ services:
     volumes:
       - ./volumes/vault/agent:/etc/vault
       - secrets:/vault/secrets
+    healthcheck:
+      test: ["CMD", "stat", "/etc/vault/templates/minio_credentials.ctmpl"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
     depends_on:
       vaultsetup:
         condition: service_completed_successfully

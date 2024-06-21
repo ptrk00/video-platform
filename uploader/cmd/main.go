@@ -264,19 +264,19 @@ func login(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func validateToken(tokenStr string) (*Claims, error) {
-	claims := &Claims{}
-	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
-		return []byte(jwtSecret), nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if !token.Valid {
-		return nil, fmt.Errorf("invalid token")
-	}
-	return claims, nil
-}
+// func validateToken(tokenStr string) (*Claims, error) {
+// 	claims := &Claims{}
+// 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
+// 		return []byte(jwtSecret), nil
+// 	})
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	if !token.Valid {
+// 		return nil, fmt.Errorf("invalid token")
+// 	}
+// 	return claims, nil
+// }
 
 func authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -288,67 +288,68 @@ func authenticate(next http.Handler) http.Handler {
 		}
 
 		tokenStr := authHeader[len("Bearer "):]
-		claims, err := validateToken(tokenStr)
-		if err != nil {
-			l.Errorf("error validating token %v", err)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
+		// claims, err := validateToken(tokenStr)
+		// if err != nil {
+		// 	l.Errorf("error validating token %v", err)
+		// 	http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		// 	return
+		// }
 
 		// Check the token against the OPA policy
-		if err := checkOPAPolicy(claims); err != nil {
+		result, err := checkOPAPolicy(tokenStr)
+		if err != nil {
 			l.Errorf("error checking opa policy: %v", err)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), "username", claims.Username)
+		ctx := context.WithValue(r.Context(), "username", result["username"])
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-func checkOPAPolicy(claims *Claims) error {
+func checkOPAPolicy(tokenStr string) (map[string]interface{}, error) {
 	ctx := context.Background()
 	input := map[string]interface{}{
 		"input": map[string]interface{}{
-			"username": claims.Username,
+			"token":    tokenStr,
 		},
 	}
 
 	inputData, err := json.Marshal(input)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	opaURL := "http://opa:8181/v1/data/authz/allow"
 	req, err := http.NewRequestWithContext(ctx, "POST", opaURL, bytes.NewBuffer(inputData))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("authorization failed: %s", resp.Status)
+		return nil, fmt.Errorf("authorization failed: %s", resp.Status)
 	}
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return err
+		return nil, err
 	}
 
 	allowed, ok := result["result"].(bool)
 	if !ok || !allowed {
-		return fmt.Errorf("authorization failed")
+		return nil, fmt.Errorf("authorization failed")
 	}
-
-	return nil
+	l.Info(result)
+	return result, nil
 }
 
 

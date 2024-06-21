@@ -4,7 +4,7 @@
 * minio
 * nats
 * postgres
+* opa
 
 ===
-* opa
 * consul (service mesh)
