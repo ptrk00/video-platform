@@ -1,21 +1,25 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"time"
 
+	"github.com/dgrijalva/jwt-go"
 	_ "github.com/jackc/pgx/v4/stdlib"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/nats-io/nats.go"
+	// "github.com/open-policy-agent/opa/rego"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/viper"
@@ -29,6 +33,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -41,6 +46,7 @@ const (
 	videoFormFilenameOpt = "VIDEO_FORM_FILENAME"
 	postgresDSNOpt       = "POSTGRES_DSN"
 	jaegerEndpointOpt    = "JAEGER_ENDPOINT"
+	jwtSecret            = "supersecretkey"
 )
 
 type ServerConfig struct {
@@ -53,6 +59,16 @@ type ServerConfig struct {
 	VideoFormFilename string
 	PostgresDSN       string
 	JaegerEndpoint    string
+}
+
+type Credentials struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type Claims struct {
+	Username string `json:"username"`
+	jwt.StandardClaims
 }
 
 func buildConfig() *ServerConfig {
@@ -192,6 +208,150 @@ func storeFileMetadata(ctx context.Context, db *sql.DB, filename string, filesiz
 	return err
 }
 
+func generateJWT(username string) (string, error) {
+	expirationTime := time.Now().Add(1 * time.Hour)
+	claims := &Claims{
+		Username: username,
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: expirationTime.Unix(),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(jwtSecret))
+	if err != nil {
+		return "", err
+	}
+	return tokenString, nil
+}
+
+func login(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var creds Credentials
+		err := json.NewDecoder(r.Body).Decode(&creds)
+		if err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		// Query the user from the database
+		var storedPassword string
+		err = db.QueryRow("SELECT password FROM app_users WHERE username=$1", creds.Username).Scan(&storedPassword)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				l.Error(err)
+				http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			} else {
+				l.Error(err)
+				http.Error(w, "Server error", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		// Compare the stored hashed password with the provided password
+		err = bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(creds.Password))
+		if err != nil {
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			return
+		}
+
+		token, err := generateJWT(creds.Username)
+		if err != nil {
+			http.Error(w, "Error generating token", http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]string{"token": token})
+	}
+}
+
+func validateToken(tokenStr string) (*Claims, error) {
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(jwtSecret), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !token.Valid {
+		return nil, fmt.Errorf("invalid token")
+	}
+	return claims, nil
+}
+
+func authenticate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			l.Info("no auth header")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		tokenStr := authHeader[len("Bearer "):]
+		claims, err := validateToken(tokenStr)
+		if err != nil {
+			l.Errorf("error validating token %v", err)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Check the token against the OPA policy
+		if err := checkOPAPolicy(claims); err != nil {
+			l.Errorf("error checking opa policy: %v", err)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), "username", claims.Username)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func checkOPAPolicy(claims *Claims) error {
+	ctx := context.Background()
+	input := map[string]interface{}{
+		"input": map[string]interface{}{
+			"username": claims.Username,
+		},
+	}
+
+	inputData, err := json.Marshal(input)
+	if err != nil {
+		return err
+	}
+
+	opaURL := "http://opa:8181/v1/data/authz/allow"
+	req, err := http.NewRequestWithContext(ctx, "POST", opaURL, bytes.NewBuffer(inputData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("authorization failed: %s", resp.Status)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return err
+	}
+
+	allowed, ok := result["result"].(bool)
+	if !ok || !allowed {
+		return fmt.Errorf("authorization failed")
+	}
+
+	return nil
+}
+
+
 func main() {
 	l.Debug("Reading configuration")
 	config := buildConfig()
@@ -224,7 +384,9 @@ func main() {
 		return
 	}
 
-	http.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/login", login(db))
+
+	http.Handle("/upload", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx, span := otel.Tracer("uploader").Start(r.Context(), "HandleUpload")
 		defer span.End()
 
@@ -290,7 +452,7 @@ func main() {
 			zap.String("filename", handler.Filename))
 		fmt.Fprintf(w, "Successfully uploaded %s\n", handler.Filename)
 		publishMessage(ctx, config.MinioBucket, handler.Filename)
-	})
+	})))
 
 	// Expose the /metrics endpoint
 	http.Handle("/metrics", promhttp.Handler())

@@ -200,6 +200,14 @@ services:
       - secrets:/tmp/vol
     command: chmod 777 /tmp/vol
 
+  opa:
+    image: openpolicyagent/opa:latest
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./volumes/opa/policy.rego:/etc/opa/policy.rego
+    command: ["run", "--server", "/etc/opa/policy.rego"]
+
 volumes:
   minio_data:
     driver: local

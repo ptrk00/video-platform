@@ -1,0 +1,12 @@
+services:
+  - name: "example"
+    url: "http://opa:8181"
+
+bundles:
+  example:
+    service: "example"
+    resource: "policy.rego"
+
+labels:
+  version: "0.1.0"
+  author: "author"
