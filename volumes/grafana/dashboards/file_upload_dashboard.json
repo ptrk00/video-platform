@@ -1,0 +1,25 @@
+{
+    "annotations": {
+      "list": []
+    },
+    "panels": [
+      {
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "file_upload_count",
+            "format": "time_series",
+            "intervalFactor": 2,
+            "legendFormat": "{{instance}}",
+            "refId": "A"
+          }
+        ],
+        "title": "File Upload Count",
+        "type": "graph"
+      }
+    ],
+    "title": "File Upload Dashboard",
+    "uid": "file-upload-dashboard",
+    "version": 1
+  }
+  

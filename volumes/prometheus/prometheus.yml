@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'uploader'
+    static_configs:
+      - targets: ['uploader:8080']
