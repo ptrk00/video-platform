@@ -34,6 +34,33 @@ services:
       - secrets:/vault/secrets
     entrypoint: ["sh", "-c", ". /vault/secrets/minio_credentials && ./uploader"]
 
+  handler:
+    container_name: handler
+    hostname: handler
+    image: elearning-handler
+    build:
+      context: .
+      dockerfile: handler/Dockerfile
+    expose:
+      - '7070'
+    ports:
+      - '7070:7070'
+    environment:
+      PORT: 7070
+      MINIO_HOST: minio
+      MINIO_PORT: 9000
+      MINIO_BUCKET: videos
+      VIDEO_FORM_FILENAME: myfile
+      JAEGER_ENDPOINT: http://jaeger:14268/api/traces
+      ENCRYPTION_KEY: "f51aa89afefee65d71600417a0e5d6af6ac9c42a8929fce3fef07808e2887360"
+    depends_on:
+      uploader:
+        condition: service_started
+    volumes:
+      - ./volumes/vault/agent:/etc/vault
+      - secrets:/vault/secrets
+    entrypoint: ["sh", "-c", ". /vault/secrets/minio_credentials && ./handler"]
+
   vault:
     image: vault:1.13.3
     ports:
@@ -104,7 +131,7 @@ services:
     hostname: miniosetup
     image: minio/minio
     entrypoint: [ "sh", "-c", "mc alias set minio http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing minio/videos"]
+      mc mb --ignore-existing minio/videos && mc mb --ignore-existing minio/backup"]
     depends_on:
       - minio
     volumes:

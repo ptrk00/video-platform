@@ -60,6 +60,11 @@ type ServerConfig struct {
 	JaegerEndpoint    string
 }
 
+type Message struct {
+	Bucket string `json:"bucket"`
+	Filename   string `json:"filename"`
+}
+
 type Credentials struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -141,6 +146,7 @@ func publishMessage(ctx context.Context, bucketname, filename string) {
 	nc, err := nats.Connect("nats://admin:admin@nats:4222")
 	if err != nil {
 		zap.Error(err)
+		return
 	}
 	defer nc.Close()
 
@@ -148,21 +154,35 @@ func publishMessage(ctx context.Context, bucketname, filename string) {
 	js, err := nc.JetStream()
 	if err != nil {
 		zap.Error(err)
+		return
 	}
 
-	// Publish a message
+	// Create the message
+	message := Message{
+		Bucket: bucketname,
+		Filename:   filename,
+	}
+	data, err := json.Marshal(message)
+	if err != nil {
+		zap.Error(err)
+		return
+	}
+
+	// Publish the message
 	msg := nats.NewMsg("videos.uploaded")
-	msg.Data = []byte(fmt.Sprintf("%s:%s", bucketname, filename))
+	msg.Data = data
 	msg.Header.Add("time", time.Now().String())
 
 	// Send the message
 	ack, err := js.PublishMsg(msg)
 	if err != nil {
 		zap.Error(err)
+		return
 	}
 
 	log.Printf("Published message on subject %s with sequence %d\n", msg.Subject, ack.Sequence)
 }
+
 
 func computeChecksum(reader io.Reader) (string, string, error) {
 	hashMd5 := md5.New()
