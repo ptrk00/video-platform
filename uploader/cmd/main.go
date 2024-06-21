@@ -16,6 +16,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/viper"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -24,10 +26,8 @@ import (
 	"go.opentelemetry.io/otel/exporters/jaeger"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/trace"
-
-	// "go.opentelemetry.io/otel/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -69,7 +69,15 @@ func buildConfig() *ServerConfig {
 	}
 }
 
-var l *zap.SugaredLogger
+var (
+	l               *zap.SugaredLogger
+	fileUploadCount = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "file_upload_count",
+			Help: "Number of files uploaded",
+		},
+	)
+)
 
 func initTracer(config *ServerConfig) (*sdktrace.TracerProvider, error) {
 	exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(config.JaegerEndpoint)))
@@ -103,6 +111,9 @@ func init() {
 	if err != nil {
 		l.Info("Did not find config file... Configuring from envs")
 	}
+
+	// Register Prometheus metrics
+	prometheus.MustRegister(fileUploadCount)
 }
 
 func publishMessage(ctx context.Context, bucketname, filename string) {
@@ -153,18 +164,26 @@ func storeFileMetadata(ctx context.Context, db *sql.DB, filename string, filesiz
 	tracer := otel.Tracer("uploader")
 	_, span := tracer.Start(ctx, "storeFileMetadata")
 	defer span.End()
+
+	// Add attributes to the span
 	span.SetAttributes(
 		attribute.String("filename", filename),
+		attribute.Int64("filesize", filesize),
+		attribute.String("content_type", contentType),
 		attribute.String("etag", etag),
+		attribute.String("file_url", fileURL),
+		attribute.String("checksum", checksum),
+		attribute.Int("user_id", userID),
 	)
 
-	query := `INSERT INTO files (filename, filesize, content_type, etag, file_url, checksum, user_id) VALUES ($1, $2, $3, $4, $5, $6, $7)`
-
+	// Add an event to the span
 	span.AddEvent("Storing file metadata in the database", trace.WithAttributes(
-		attribute.String("etag", etag),
-		attribute.String("query", query),
+		attribute.String("filename", filename),
+		attribute.Int64("filesize", filesize),
+		attribute.String("content_type", contentType),
 	))
-	
+
+	query := `INSERT INTO files (filename, filesize, content_type, etag, file_url, checksum, user_id) VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	_, err := db.ExecContext(ctx, query, filename, filesize, contentType, etag, fileURL, checksum, userID)
 	if err != nil {
 		span.SetStatus(codes.Error, "Failed to execute query")
@@ -252,6 +271,9 @@ func main() {
 			return
 		}
 
+		// Increment the Prometheus counter
+		fileUploadCount.Inc()
+
 		// Get the file URL and ETag
 		fileURL := fmt.Sprintf("http://%s/%s/%s", config.MinioHost, config.MinioBucket, handler.Filename)
 		etag := info.ETag
@@ -269,6 +291,9 @@ func main() {
 		fmt.Fprintf(w, "Successfully uploaded %s\n", handler.Filename)
 		publishMessage(ctx, config.MinioBucket, handler.Filename)
 	})
+
+	// Expose the /metrics endpoint
+	http.Handle("/metrics", promhttp.Handler())
 
 	http.ListenAndServe(fmt.Sprintf(":%d", config.Port), otelhttp.NewHandler(http.DefaultServeMux, "Server"))
 }
