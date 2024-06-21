@@ -8,3 +8,7 @@ scrape_configs:
   - job_name: 'opa'
     static_configs:
       - targets: ['opa:8181']
+  - job_name: 'minio'
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets: ['minio:9000']
