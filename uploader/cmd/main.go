@@ -145,6 +145,8 @@ func publishMessage(ctx context.Context, bucketname, filename string) {
 	// Connect to a NATS server
 	nc, err := nats.Connect("nats://admin:admin@nats:4222")
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to connect to NATS")
 		zap.Error(err)
 		return
 	}
@@ -153,6 +155,8 @@ func publishMessage(ctx context.Context, bucketname, filename string) {
 	// Get JetStream context
 	js, err := nc.JetStream()
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to get JetStream context")
 		zap.Error(err)
 		return
 	}
@@ -164,6 +168,8 @@ func publishMessage(ctx context.Context, bucketname, filename string) {
 	}
 	data, err := json.Marshal(message)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to marshal message")
 		zap.Error(err)
 		return
 	}
@@ -176,19 +182,27 @@ func publishMessage(ctx context.Context, bucketname, filename string) {
 	// Send the message
 	ack, err := js.PublishMsg(msg)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to publish message")
 		zap.Error(err)
 		return
 	}
 
+	span.SetAttributes(attribute.Int64("nats.sequence", int64(ack.Sequence)))
 	log.Printf("Published message on subject %s with sequence %d\n", msg.Subject, ack.Sequence)
 }
 
-func computeChecksum(reader io.Reader) (string, string, error) {
+func computeChecksum(ctx context.Context, reader io.Reader) (string, string, error) {
+	_, span := otel.Tracer("uploader").Start(ctx, "computeChecksum")
+	defer span.End()
+
 	hashMd5 := md5.New()
 	hashSha256 := sha256.New()
 	tee := io.MultiWriter(hashMd5, hashSha256)
 
 	if _, err := io.Copy(tee, reader); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to compute checksum")
 		return "", "", err
 	}
 
@@ -228,7 +242,7 @@ func storeFileMetadata(ctx context.Context, db *sql.DB, filename string, filesiz
 }
 
 func generateJWT(username string, id int) (string, error) {
-	expirationTime := time.Now().Add(10 * time.Hour)
+	expirationTime := time.Now().Add(1 * time.Hour)
 	claims := &Claims{
 		Username: username,
 		ID:       id,
@@ -307,14 +321,14 @@ func authenticate(next http.Handler) http.Handler {
 		}
 
 		// Check the token against the OPA policy
-		result, err := checkOPAPolicy(tokenStr)
+		_, err = checkOPAPolicy(tokenStr)
 		if err != nil {
 			l.Errorf("error checking opa policy: %v", err)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), "username", result["username"])
+		ctx := context.WithValue(r.Context(), "username", claims.Username)
 		ctx = context.WithValue(ctx, "id", claims.ID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -462,7 +476,15 @@ func uploadFileHandler(config *ServerConfig, db *sql.DB, minioClient *minio.Clie
 		ctx, span := otel.Tracer("uploader").Start(r.Context(), "HandleUpload")
 		defer span.End()
 
-		l.Debugw("Handling video upload")
+		username := r.Context().Value("username").(string)
+		userID := r.Context().Value("id").(int)
+
+		span.SetAttributes(
+			attribute.String("username", username),
+			attribute.Int("user_id", userID),
+		)
+
+		l.Debugw("Handling video upload", "username", username)
 		if r.Method != "POST" {
 			http.Error(w, "Unsupported method", http.StatusMethodNotAllowed)
 			return
@@ -486,7 +508,7 @@ func uploadFileHandler(config *ServerConfig, db *sql.DB, minioClient *minio.Clie
 
 		// Create a new reader to compute the checksum and upload the file
 		file.Seek(0, io.SeekStart)
-		_, sha256Checksum, err := computeChecksum(file)
+		_, sha256Checksum, err := computeChecksum(ctx, file)
 		if err != nil {
 			l.Errorw("Could not compute checksum", zap.String("filename", handler.Filename), zap.Error(err))
 			http.Error(w, "Error computing checksum", http.StatusInternalServerError)
@@ -513,7 +535,6 @@ func uploadFileHandler(config *ServerConfig, db *sql.DB, minioClient *minio.Clie
 		etag := info.ETag
 
 		// Store metadata in PostgreSQL
-		userID := r.Context().Value("id").(int)
 		err = storeFileMetadata(ctx, db, handler.Filename, fileSize, contentType, etag, fileURL, sha256Checksum, userID)
 		if err != nil {
 			l.Errorw("Could not store file metadata", zap.String("filename", handler.Filename), zap.Error(err))
@@ -522,7 +543,7 @@ func uploadFileHandler(config *ServerConfig, db *sql.DB, minioClient *minio.Clie
 		}
 
 		l.Infow("Successfully uploaded file", zap.String("bucketname", config.MinioBucket),
-			zap.String("filename", handler.Filename))
+			zap.String("filename", handler.Filename), zap.String("username", username))
 		fmt.Fprintf(w, "Successfully uploaded %s\n", handler.Filename)
 		publishMessage(ctx, config.MinioBucket, handler.Filename)
 	}
