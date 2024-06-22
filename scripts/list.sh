@@ -1,1 +1,1 @@
-curl -vvv -X POST http://localhost:8080/files -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InVzZXIxIiwiaWQiOjEsImV4cCI6MTcxOTAwMTE0OH0.1tJhybuNwjVEmjfptMWusHp7vtSZU7ZR1v0FafZH4_A'
+curl -vvv -X POST http://localhost:8080/files -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InVzZXIxIiwiaWQiOjEsImV4cCI6MTcxOTA3NzQ0N30.8gQH3LIo3_XkepaZFVJajCMOxP9VqLWWeZttyiM-6Eg'

@@ -61,8 +61,8 @@ type ServerConfig struct {
 }
 
 type Message struct {
-	Bucket string `json:"bucket"`
-	Filename   string `json:"filename"`
+	Bucket   string `json:"bucket"`
+	Filename string `json:"filename"`
 }
 
 type Credentials struct {
@@ -159,8 +159,8 @@ func publishMessage(ctx context.Context, bucketname, filename string) {
 
 	// Create the message
 	message := Message{
-		Bucket: bucketname,
-		Filename:   filename,
+		Bucket:   bucketname,
+		Filename: filename,
 	}
 	data, err := json.Marshal(message)
 	if err != nil {
@@ -182,7 +182,6 @@ func publishMessage(ctx context.Context, bucketname, filename string) {
 
 	log.Printf("Published message on subject %s with sequence %d\n", msg.Subject, ack.Sequence)
 }
-
 
 func computeChecksum(reader io.Reader) (string, string, error) {
 	hashMd5 := md5.New()
@@ -229,7 +228,7 @@ func storeFileMetadata(ctx context.Context, db *sql.DB, filename string, filesiz
 }
 
 func generateJWT(username string, id int) (string, error) {
-	expirationTime := time.Now().Add(1 * time.Hour)
+	expirationTime := time.Now().Add(10 * time.Hour)
 	claims := &Claims{
 		Username: username,
 		ID:       id,
@@ -392,12 +391,12 @@ func getUserFiles(db *sql.DB) http.HandlerFunc {
 				return
 			}
 			file = map[string]interface{}{
-				"filename":    filename,
-				"filesize":    filesize,
+				"filename":     filename,
+				"filesize":     filesize,
 				"content_type": contentType,
-				"etag":        etag,
-				"file_url":    fileURL,
-				"checksum":    checksum,
+				"etag":         etag,
+				"file_url":     fileURL,
+				"checksum":     checksum,
 			}
 			files = append(files, file)
 		}
@@ -458,41 +457,8 @@ func downloadFile(db *sql.DB, minioClient *minio.Client, bucketName string) http
 	}
 }
 
-func main() {
-	l.Debug("Reading configuration")
-	config := buildConfig()
-
-	// Initialize OpenTelemetry tracer
-	tp, err := initTracer(config)
-	if err != nil {
-		l.Fatal("Failed to initialize OpenTelemetry tracer", zap.Error(err))
-	}
-	defer func() {
-		if err := tp.Shutdown(context.Background()); err != nil {
-			l.Fatal("Failed to shutdown OpenTelemetry tracer", zap.Error(err))
-		}
-	}()
-
-	// Connect to PostgreSQL
-	db, err := sql.Open("pgx", "postgresql://postgres:5432/videos?user=postgres&password=postgres")
-	if err != nil {
-		l.Fatal("Failed to connect to PostgreSQL", zap.Error(err))
-	}
-	defer db.Close()
-
-	// Initialize MinIO client
-	minioClient, err := minio.New(fmt.Sprintf("%s:%d", config.MinioHost, config.MinioPort), &minio.Options{
-		Creds:  credentials.NewStaticV4(config.MinioUser, config.MinioPassword, ""),
-		Secure: false,
-	})
-	if err != nil {
-		l.Error("Failed to initialize minio client", zap.Error(err))
-		return
-	}
-
-	http.HandleFunc("/login", login(db))
-
-	http.Handle("/upload", authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func uploadFileHandler(config *ServerConfig, db *sql.DB, minioClient *minio.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, span := otel.Tracer("uploader").Start(r.Context(), "HandleUpload")
 		defer span.End()
 
@@ -547,7 +513,8 @@ func main() {
 		etag := info.ETag
 
 		// Store metadata in PostgreSQL
-		err = storeFileMetadata(ctx, db, handler.Filename, fileSize, contentType, etag, fileURL, sha256Checksum, 1) // Assuming userID is 1 for this example
+		userID := r.Context().Value("id").(int)
+		err = storeFileMetadata(ctx, db, handler.Filename, fileSize, contentType, etag, fileURL, sha256Checksum, userID)
 		if err != nil {
 			l.Errorw("Could not store file metadata", zap.String("filename", handler.Filename), zap.Error(err))
 			http.Error(w, "Error storing file metadata", http.StatusInternalServerError)
@@ -558,8 +525,43 @@ func main() {
 			zap.String("filename", handler.Filename))
 		fmt.Fprintf(w, "Successfully uploaded %s\n", handler.Filename)
 		publishMessage(ctx, config.MinioBucket, handler.Filename)
-	})))
+	}
+}
 
+func main() {
+	l.Debug("Reading configuration")
+	config := buildConfig()
+
+	// Initialize OpenTelemetry tracer
+	tp, err := initTracer(config)
+	if err != nil {
+		l.Fatal("Failed to initialize OpenTelemetry tracer", zap.Error(err))
+	}
+	defer func() {
+		if err := tp.Shutdown(context.Background()); err != nil {
+			l.Fatal("Failed to shutdown OpenTelemetry tracer", zap.Error(err))
+		}
+	}()
+
+	// Connect to PostgreSQL
+	db, err := sql.Open("pgx", "postgresql://postgres:5432/videos?user=postgres&password=postgres")
+	if err != nil {
+		l.Fatal("Failed to connect to PostgreSQL", zap.Error(err))
+	}
+	defer db.Close()
+
+	// Initialize MinIO client
+	minioClient, err := minio.New(fmt.Sprintf("%s:%d", config.MinioHost, config.MinioPort), &minio.Options{
+		Creds:  credentials.NewStaticV4(config.MinioUser, config.MinioPassword, ""),
+		Secure: false,
+	})
+	if err != nil {
+		l.Error("Failed to initialize minio client", zap.Error(err))
+		return
+	}
+
+	http.HandleFunc("/login", login(db))
+	http.Handle("/upload", authenticate(uploadFileHandler(config, db, minioClient)))
 	http.Handle("/files", authenticate(getUserFiles(db)))
 	http.Handle("/download", authenticate(downloadFile(db, minioClient, config.MinioBucket)))
 

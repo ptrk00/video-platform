@@ -1,1 +1,1 @@
-curl -X GET http://localhost:8080/download -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InVzZXIxIiwiaWQiOjEsImV4cCI6MTcxOTAwMTE0OH0.1tJhybuNwjVEmjfptMWusHp7vtSZU7ZR1v0FafZH4_A" -G --data-urlencode "etag=8f3202cd79145a6e0d0f2cf786c8c6dd" -o downloaded
+curl -X GET http://localhost:8080/download -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InVzZXIxIiwiaWQiOjEsImV4cCI6MTcxOTA3NzQ0N30.8gQH3LIo3_XkepaZFVJajCMOxP9VqLWWeZttyiM-6Eg" -G --data-urlencode "etag=8f3202cd79145a6e0d0f2cf786c8c6dd" -o downloaded

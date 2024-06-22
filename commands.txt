@@ -1,0 +1,10 @@
+minio
+
+ mc ls local/videos
+ mc ls local/backup
+ mc get local/backup/login.sh downloaded
+
+
+nats
+nats stream view
+
