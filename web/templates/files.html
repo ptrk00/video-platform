@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}My Files{% endblock %}
+
+{% block content %}
+<h1>Your Files</h1>
+<ul>
+    {% for file in files %}
+    <li>{{ file.filename }} - {{ file.filesize }} bytes - <a href="/download?etag={{ file.etag }}">Download</a></li>
+    {% endfor %}
+</ul>
+{% if error %}
+<p>{{ error }}</p>
+{% endif %}
+{% endblock %}
