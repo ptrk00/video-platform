@@ -1,15 +1,27 @@
 {% extends "base.html" %}
 
-{% block title %}My Files{% endblock %}
+{% block title %}Files{% endblock %}
 
 {% block content %}
 <h1>Your Files</h1>
-<ul>
+<div class="row">
     {% for file in files %}
-    <li>{{ file.filename }} - {{ file.filesize }} bytes - <a href="/download?etag={{ file.etag }}">Download</a></li>
+    <div class="col-md-4">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">{{ file.filename }}</h5>
+                <p class="card-text">
+                    Type: {{ file.content_type }}<br>
+                    Size: {{ file.filesize }} bytes<br>
+                    Checksum: {{ file.checksum }}
+                </p>
+                <a href="/download?etag={{ file.etag }}" class="btn btn-primary">Download</a>
+            </div>
+        </div>
+    </div>
     {% endfor %}
-</ul>
+</div>
 {% if error %}
-<p>{{ error }}</p>
+<div class="alert alert-danger mt-3">{{ error }}</div>
 {% endif %}
 {% endblock %}

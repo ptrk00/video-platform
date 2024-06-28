@@ -3,8 +3,11 @@
 {% block title %}Home{% endblock %}
 
 {% block content %}
-<h1>Welcome to the Video Platform</h1>
-<a href="/login">Login</a>
-<a href="/upload">Upload</a>
-<a href="/files">My Files</a>
+<div class="jumbotron">
+    <h1 class="display-4">Welcome to My App</h1>
+    <p class="lead">This is a simple application to manage and download your files.</p>
+    <hr class="my-4">
+    <p>You can log in and upload your files securely.</p>
+    <a class="btn btn-primary btn-lg" href="/login" role="button">Login</a>
+</div>
 {% endblock %}

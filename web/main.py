@@ -7,7 +7,7 @@ import io
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-uploader_service_url = "http://uploader:8080"
+uploader_service_url = "http://localhost:8080"
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
