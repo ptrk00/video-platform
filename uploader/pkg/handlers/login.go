@@ -11,7 +11,6 @@ import (
 	"video-platform/uploader/pkg/auth"
 )
 
-
 func Login(db *sql.DB, l *zap.SugaredLogger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var creds auth.Credentials

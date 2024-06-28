@@ -2,10 +2,9 @@ package auth
 
 import (
 	"context"
-	"net/http"
-
 	"github.com/dgrijalva/jwt-go"
 	"go.uber.org/zap"
+	"net/http"
 )
 
 func Authenticate(next http.Handler, l *zap.SugaredLogger) http.Handler {

@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	jwtSecret            = "supersecretkey"
+	jwtSecret = "supersecretkey"
 )
 
 type Claims struct {

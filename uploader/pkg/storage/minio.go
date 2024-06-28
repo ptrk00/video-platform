@@ -1,5 +1,6 @@
 package storage
+
 type Credentials struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 }

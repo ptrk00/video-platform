@@ -9,6 +9,6 @@ var FileUploadCount = prometheus.NewCounter(
 	},
 )
 
-func init () {
+func init() {
 	prometheus.MustRegister(FileUploadCount)
 }

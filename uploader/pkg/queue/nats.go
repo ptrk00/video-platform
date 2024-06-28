@@ -1,15 +1,15 @@
 package queue
 
 import (
-	"go.uber.org/zap"
+	"context"
+	"encoding/json"
+	"github.com/nats-io/nats.go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"context"
-	"github.com/nats-io/nats.go"
-	"encoding/json"
-	"time"
+	"go.uber.org/zap"
 	"log"
+	"time"
 )
 
 func PublishMessage(ctx context.Context, bucketname, filename string) {

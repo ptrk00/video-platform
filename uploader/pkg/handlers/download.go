@@ -2,14 +2,13 @@ package handlers
 
 import (
 	"context"
-	"io"
-	"github.com/minio/minio-go/v7"
-	"go.uber.org/zap"
 	"database/sql"
 	"fmt"
+	"github.com/minio/minio-go/v7"
+	"go.uber.org/zap"
+	"io"
 	"net/http"
 )
-
 
 func DownloadFile(db *sql.DB, minioClient *minio.Client, bucketName string, l *zap.SugaredLogger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

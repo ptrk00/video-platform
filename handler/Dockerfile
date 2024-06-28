@@ -8,9 +8,11 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY handler/cmd/main.go ./
+COPY handler/cmd/main.go ./handler/cmd/
+COPY handler/pkg ./handler/pkg
+COPY uploader/pkg ./uploader/pkg
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o /handler
+RUN CGO_ENABLED=0 GOOS=linux go build -o /handler ./handler/cmd/main.go
 
 # TODO: uncomment when test will be there
 # Run the tests in the container

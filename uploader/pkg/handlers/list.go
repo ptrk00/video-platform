@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap"
 )
 
-
 func GetUserFiles(db *sql.DB, l *zap.SugaredLogger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := r.Context().Value("id").(int)
@@ -51,7 +50,7 @@ func GetUserFiles(db *sql.DB, l *zap.SugaredLogger) http.HandlerFunc {
 				return
 			}
 
-			deleted := time.Now().After(uploaded_timestamp.Add(2*time.Minute))
+			deleted := time.Now().After(uploaded_timestamp.Add(2 * time.Minute))
 			l.Infof("Time now is %s", time.Now())
 			l.Infof("File %s is marked as %t due to %s uploaded_tiemstamp", filename, deleted, uploaded_timestamp.String())
 			file = map[string]interface{}{
@@ -61,7 +60,7 @@ func GetUserFiles(db *sql.DB, l *zap.SugaredLogger) http.HandlerFunc {
 				"etag":         etag,
 				"file_url":     fileURL,
 				"checksum":     checksum,
-				"deleted": 		deleted,
+				"deleted":      deleted,
 			}
 			files = append(files, file)
 		}

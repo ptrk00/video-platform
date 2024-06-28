@@ -1,21 +1,20 @@
 package handlers
 
 import (
-	"net/http"
 	"database/sql"
-	"go.uber.org/zap"
+	"fmt"
+	"github.com/minio/minio-go/v7"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"github.com/minio/minio-go/v7"
+	"go.uber.org/zap"
 	"io"
-	"video-platform/uploader/pkg/queue"
-	"video-platform/uploader/pkg/storage"
-	"video-platform/uploader/pkg/process" 
+	"net/http"
 	"video-platform/uploader/pkg/config"
 	"video-platform/uploader/pkg/monitoring"
-	"fmt"
+	"video-platform/uploader/pkg/process"
+	"video-platform/uploader/pkg/queue"
+	"video-platform/uploader/pkg/storage"
 )
-
 
 func UploadFileHandler(config *config.ServerConfig, db *sql.DB, minioClient *minio.Client,
 	l *zap.SugaredLogger) http.HandlerFunc {
