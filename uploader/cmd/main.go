@@ -465,7 +465,7 @@ func downloadFile(db *sql.DB, minioClient *minio.Client, bucketName string) http
 		} else {
 			err = db.QueryRow("SELECT filename, content_type FROM files WHERE etag=$1 AND user_id=$2", etag, userID).Scan(&filename, &contentType)
 		}
-		
+
 		if err != nil {
 			if err == sql.ErrNoRows {
 				http.Error(w, "File not found", http.StatusNotFound)
@@ -477,6 +477,13 @@ func downloadFile(db *sql.DB, minioClient *minio.Client, bucketName string) http
 		}
 
 		// Get the file from MinIO
+		archived := r.URL.Query().Get("archived")
+		if archived == "true" {
+			l.Info("Changing bucket name to backup")
+			bucketName = "backup"
+		} else {
+			bucketName = "videos"
+		}
 		object, err := minioClient.GetObject(context.Background(), bucketName, filename, minio.GetObjectOptions{})
 		if err != nil {
 			l.Error(err)

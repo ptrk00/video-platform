@@ -16,7 +16,10 @@
                     Size: {{ file.filesize }} bytes<br>
                     Checksum: {{ file.checksum }}
                 </p>
-                <a href="/download?etag={{ file.etag }}" class="btn btn-primary">Download</a>
+                <a href="/download?etag={{ file.etag }}&archived=false" class="btn btn-primary">Download</a>
+                {% if username == "admin" %}
+                <a href="/download?etag={{ file.etag }}&archived=true" class="btn btn-primary">Download archived</a>
+                {% endif %}
             </div>
         </div>
     </div>
