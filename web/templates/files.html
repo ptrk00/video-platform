@@ -4,6 +4,7 @@
 
 {% block content %}
 <h1>Your Files</h1>
+{% if files %}
 <div class="row">
     {% for file in files %}
     <div class="col-md-4">
@@ -21,6 +22,9 @@
     </div>
     {% endfor %}
 </div>
+{% else %}
+<p>No files available.</p>
+{% endif %}
 {% if error %}
 <div class="alert alert-danger mt-3">{{ error }}</div>
 {% endif %}

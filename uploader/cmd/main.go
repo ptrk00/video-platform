@@ -329,6 +329,11 @@ func authenticate(next http.Handler) http.Handler {
 		}
 
 		ctx := context.WithValue(r.Context(), "username", claims.Username)
+		if claims.Username == "admin" {
+			ctx = context.WithValue(ctx, "admin", true)
+		} else {
+			ctx = context.WithValue(ctx, "admin", false)
+		}
 		ctx = context.WithValue(ctx, "id", claims.ID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -386,11 +391,23 @@ func getUserFiles(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		rows, err := db.Query("SELECT filename, filesize, content_type, etag, file_url, checksum FROM files WHERE user_id=$1", userID)
-		if err != nil {
-			l.Error(err)
-			http.Error(w, "Server error", http.StatusInternalServerError)
-			return
+		isAdmin, _ := r.Context().Value("admin").(bool)
+		var rows *sql.Rows
+		var err error
+		if isAdmin {
+			rows, err = db.Query("SELECT filename, filesize, content_type, etag, file_url, checksum FROM files")
+			if err != nil {
+				l.Error(err)
+				http.Error(w, "Server error", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			rows, err = db.Query("SELECT filename, filesize, content_type, etag, file_url, checksum FROM files WHERE user_id=$1", userID)
+			if err != nil {
+				l.Error(err)
+				http.Error(w, "Server error", http.StatusInternalServerError)
+				return
+			}
 		}
 		defer rows.Close()
 
@@ -440,7 +457,15 @@ func downloadFile(db *sql.DB, minioClient *minio.Client, bucketName string) http
 
 		// Verify that the file belongs to the user
 		var filename, contentType string
-		err := db.QueryRow("SELECT filename, content_type FROM files WHERE etag=$1 AND user_id=$2", etag, userID).Scan(&filename, &contentType)
+		var err error
+		isAdmin, _ := r.Context().Value("admin").(bool)
+
+		if isAdmin {
+			err = db.QueryRow("SELECT filename, content_type FROM files WHERE etag=$1", etag).Scan(&filename, &contentType)
+		} else {
+			err = db.QueryRow("SELECT filename, content_type FROM files WHERE etag=$1 AND user_id=$2", etag, userID).Scan(&filename, &contentType)
+		}
+		
 		if err != nil {
 			if err == sql.ErrNoRows {
 				http.Error(w, "File not found", http.StatusNotFound)

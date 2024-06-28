@@ -61,17 +61,17 @@ services:
       - secrets:/vault/secrets
     entrypoint: ["sh", "-c", ". /vault/secrets/minio_credentials && ./handler"]
 
-  # web:
-  #   container_name: web
-  #   hostname: web
-  #   image: elearning-web
-  #   build:
-  #     context: ./web
-  #   ports:
-  #     - "8081:8081"
-  #   depends_on:
-  #     handler:
-  #       condition: service_started
+  web:
+    container_name: web
+    hostname: web
+    image: elearning-web
+    build:
+      context: ./web
+    ports:
+      - "8081:8081"
+    depends_on:
+      handler:
+        condition: service_started
 
   vault:
     image: vault:1.13.3
