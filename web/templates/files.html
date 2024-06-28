@@ -16,7 +16,11 @@
                     Size: {{ file.filesize }} bytes<br>
                     Checksum: {{ file.checksum }}
                 </p>
+                {% if not file.deleted %}
                 <a href="/download?etag={{ file.etag }}&archived=false" class="btn btn-primary">Download</a>
+                {% else %}
+                <a href="#" class="btn btn-secondary disabled" data-toggle="tooltip" title="Your file is gone!">Download</a>
+                {% endif %}
                 {% if username == "admin" %}
                 <a href="/download?etag={{ file.etag }}&archived=true" class="btn btn-primary">Download archived</a>
                 {% endif %}
@@ -31,4 +35,12 @@
 {% if error %}
 <div class="alert alert-danger mt-3">{{ error }}</div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    $(document).ready(function(){
+        $('[data-toggle="tooltip"]').tooltip();
+    });
+</script>
 {% endblock %}

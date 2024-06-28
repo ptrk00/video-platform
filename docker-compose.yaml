@@ -73,6 +73,16 @@ services:
       handler:
         condition: service_started
 
+  deleter:
+    container_name: deleter
+    hostname: deleter
+    image: elearning-deleter
+    build:
+      context: ./deleter
+    depends_on:
+      handler:
+        condition: service_started
+
   vault:
     image: vault:1.13.3
     ports:
